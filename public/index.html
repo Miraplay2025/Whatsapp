@@ -7,23 +7,26 @@
 
 <style>
 body {
-  font-family: Arial;
+  font-family: Arial, sans-serif;
   background: linear-gradient(135deg,#198754,#20c997);
   color:#fff;
   padding:15px;
 }
 .container {
-  max-width:420px;
+  max-width:480px;
   margin:auto;
 }
 input, button {
   width:100%;
-  padding:14px;
+  padding:12px;
   margin-top:10px;
   border-radius:8px;
   border:none;
+  font-size:16px;
 }
-button { background:#ffc107 }
+button { background:#ffc107; color:#000; cursor:pointer; }
+button:disabled { background:#ccc; cursor:default; }
+
 .box {
   background:#fff;
   color:#000;
@@ -47,14 +50,15 @@ button { background:#ffc107 }
 }
 </style>
 </head>
-
 <body>
 
 <div class="container">
 <h2>WhatsApp Sessão</h2>
 
-<input id="session" placeholder="Nome da sessão">
-<button onclick="start()">Iniciar</button>
+<div class="box">
+  <input id="session" placeholder="Nome da sessão">
+  <button onclick="start()">Iniciar sessão</button>
+</div>
 
 <div id="phoneBox" class="box" style="display:none">
   <input id="phone" placeholder="Número (sem 0 e sem +258)">
@@ -78,6 +82,7 @@ function log(msg){
   logs.scrollTop = logs.scrollHeight
 }
 
+// ===== Funções =====
 function start(){
   if (!session.value) return alert('Digite o nome da sessão')
   socket.emit('start-session', session.value)
@@ -92,6 +97,7 @@ function renewCode(){
   socket.emit('renew-code')
 }
 
+// ===== Socket events =====
 socket.on('log', log)
 
 socket.on('request-phone', () => {
@@ -108,7 +114,7 @@ socket.on('pairing-code', d => {
 
 socket.on('pairing-expired', () => {
   codeBox.innerHTML = `
-    <div class="expired">Código expirado</div>
+    <div class="expired">Código expirou</div>
     <button onclick="renewCode()">Gerar novo código</button>
   `
 })
@@ -120,12 +126,11 @@ socket.on('session-ready', d => {
   infoBox.style.display = 'block'
   infoBox.innerHTML = `
     <b>${d.name}</b><br>
-    ${d.number}<br>
-    <a href="${d.downloadUrl}">⬇️ Baixar ZIP</a>
+    Número: ${d.number}<br>
+    <a href="${d.downloadUrl}" target="_blank">⬇️ Baixar ZIP da sessão</a>
     <hr>
-    ${d.groups.map(g =>
-      `${g.name} (${g.members})`
-    ).join('<br>')}
+    <b>Grupos Participantes:</b><br>
+    ${d.groups.map(g => `${g.name} (${g.members} membros)`).join('<br>')}
   `
 })
 </script>
