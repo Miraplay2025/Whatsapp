@@ -1,8 +1,6 @@
-// ✅ FIX CRYPTO (OBRIGATÓRIO)
+// ===== FIX WEBCRYPTO (OBRIGATÓRIO) =====
 import crypto from 'crypto'
-if (!global.crypto) {
-  global.crypto = crypto.webcrypto
-}
+if (!global.crypto) global.crypto = crypto.webcrypto
 
 import express from 'express'
 import http from 'http'
@@ -12,7 +10,6 @@ import fs from 'fs'
 import archiver from 'archiver'
 
 import baileys from '@whiskeysockets/baileys'
-
 const {
   default: makeWASocket,
   useMultiFileAuthState,
@@ -28,14 +25,16 @@ app.use(express.static('public'))
 
 const sessions = {}
 const COUNTRY_CODE = '258'
+const CODE_TTL = 60 * 1000 // 60 segundos
 
+/* ================= LOG ================= */
 function log(socket, session, msg) {
   const m = `[${session}] ${msg}`
   console.log(m)
   socket.emit('log', m)
 }
 
-/* ZIP */
+/* ================= ZIP ================= */
 function zipFolder(source, out) {
   return new Promise(resolve => {
     const archive = archiver('zip')
@@ -46,8 +45,21 @@ function zipFolder(source, out) {
   })
 }
 
-/* START SESSION */
+/* ================= NORMALIZA NÚMERO ================= */
+function normalizePhone(phone) {
+  phone = phone.replace(/\D/g, '')
+  if (phone.startsWith('0')) phone = phone.slice(1)
+  if (!phone.startsWith(COUNTRY_CODE)) phone = COUNTRY_CODE + phone
+  return phone
+}
+
+/* ================= START SESSION ================= */
 async function startSession(socket, sessionName) {
+  if (sessions[sessionName]) {
+    log(socket, sessionName, '⚠️ Sessão já ativa')
+    return
+  }
+
   log(socket, sessionName, '🚀 Iniciando sessão')
 
   const sessionPath = `sessions/${sessionName}`
@@ -62,74 +74,93 @@ async function startSession(socket, sessionName) {
     printQRInTerminal: false
   })
 
-  sessions[sessionName] = sock
+  sessions[sessionName] = {
+    sock,
+    pairingTimer: null,
+    phone: null
+  }
+
   sock.ev.on('creds.update', saveCreds)
 
   socket.emit('request-phone')
   log(socket, sessionName, '📲 Aguardando número do telefone')
 
-  socket.on('send-phone', async data => {
+  /* ===== GERAR CÓDIGO ===== */
+  const generatePairingCode = async () => {
+    const session = sessions[sessionName]
+    if (!session || state.creds.registered) return
+
+    const code = await session.sock.requestPairingCode(session.phone)
+
+    socket.emit('pairing-code', { code })
+    log(socket, sessionName, '🔐 Código de pareamento gerado')
+
+    if (session.pairingTimer) clearTimeout(session.pairingTimer)
+
+    session.pairingTimer = setTimeout(() => {
+      socket.emit('pairing-expired')
+      log(socket, sessionName, '⌛ Código expirado')
+    }, CODE_TTL)
+  }
+
+  /* ===== RECEBE NÚMERO ===== */
+  socket.on('send-phone', async ({ phone }) => {
     if (state.creds.registered) return
 
-    const fullNumber = COUNTRY_CODE + data.phone
-    log(socket, sessionName, `📟 Solicitando código para ${fullNumber}`)
+    const fullNumber = normalizePhone(phone)
+    sessions[sessionName].phone = fullNumber
 
-    const sendPairingCode = async () => {
-      const code = await sock.requestPairingCode(fullNumber)
-      socket.emit('pairing-code', { code })
-      log(socket, sessionName, '🔐 Código de pareamento gerado')
-    }
-
-    await sendPairingCode()
-
-    sock.ev.on('connection.update', async ({ connection }) => {
-      if (connection === 'close' && !state.creds.registered) {
-        log(socket, sessionName, '🔁 Código expirado, gerando novo...')
-        await sendPairingCode()
-      }
-
-      if (connection === 'open') {
-        log(socket, sessionName, '✅ WhatsApp conectado')
-
-        const me = sock.user
-        const groups = await sock.groupFetchAllParticipating()
-
-        const groupInfo = Object.values(groups).map(g => ({
-          name: g.subject,
-          members: g.participants.length
-        }))
-
-        fs.mkdirSync('zips', { recursive: true })
-        const zipPath = `zips/${sessionName}.zip`
-        await zipFolder(sessionPath, zipPath)
-
-        socket.emit('session-ready', {
-          name: me.name,
-          number: me.id.split(':')[0],
-          groups: groupInfo,
-          downloadUrl: `/download/${sessionName}`
-        })
-
-        log(socket, sessionName, '📦 ZIP da sessão criado')
-      }
-    })
+    log(socket, sessionName, `📟 Número confirmado: ${fullNumber}`)
+    await generatePairingCode()
   })
 
-  socket.on('send-message', async d => {
-    const jid = `${COUNTRY_CODE}${d.phone}@s.whatsapp.net`
-    await sock.sendMessage(jid, { text: d.message })
-    log(socket, sessionName, `💬 Mensagem enviada para ${jid}`)
+  /* ===== RENOVAR CÓDIGO ===== */
+  socket.on('renew-code', async () => {
+    if (state.creds.registered) return
+    log(socket, sessionName, '🔁 Renovando código de pareamento')
+    await generatePairingCode()
+  })
+
+  /* ===== CONEXÃO ===== */
+  sock.ev.on('connection.update', async ({ connection }) => {
+    if (connection === 'open') {
+      log(socket, sessionName, '✅ WhatsApp conectado')
+
+      if (sessions[sessionName].pairingTimer)
+        clearTimeout(sessions[sessionName].pairingTimer)
+
+      const me = sock.user
+      const groups = await sock.groupFetchAllParticipating()
+
+      const groupInfo = Object.values(groups).map(g => ({
+        name: g.subject,
+        members: g.participants.length
+      }))
+
+      fs.mkdirSync('zips', { recursive: true })
+      const zipPath = `zips/${sessionName}.zip`
+      await zipFolder(sessionPath, zipPath)
+
+      socket.emit('session-ready', {
+        name: me.name,
+        number: me.id.split(':')[0],
+        groups: groupInfo,
+        downloadUrl: `/download/${sessionName}`
+      })
+
+      log(socket, sessionName, '📦 Sessão pronta e ZIP criado')
+    }
   })
 }
 
-/* DOWNLOAD */
+/* ================= DOWNLOAD ================= */
 app.get('/download/:session', (req, res) => {
   const file = `zips/${req.params.session}.zip`
   if (!fs.existsSync(file)) return res.sendStatus(404)
   res.download(file)
 })
 
-/* SOCKET */
+/* ================= SOCKET ================= */
 io.on('connection', socket => {
   socket.on('start-session', sessionName => {
     if (!sessionName) return
