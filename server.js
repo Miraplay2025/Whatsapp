@@ -5,10 +5,13 @@ import cors from 'cors'
 import fs from 'fs'
 import archiver from 'archiver'
 
-import makeWASocket, {
+import baileys from '@whiskeysockets/baileys'
+
+const {
+  default: makeWASocket,
   useMultiFileAuthState,
   fetchLatestBaileysVersion
-} from '@whiskeysockets/baileys'
+} = baileys
 
 const app = express()
 const server = http.createServer(app)
@@ -73,7 +76,7 @@ async function startSession(socket, sessionName) {
 
     await sendPairingCode()
 
-    sock.ev.on('connection.update', async ({ connection, lastDisconnect }) => {
+    sock.ev.on('connection.update', async ({ connection }) => {
       if (connection === 'close' && !state.creds.registered) {
         log(socket, sessionName, '🔁 Código expirado, gerando novo...')
         await sendPairingCode()
@@ -122,7 +125,10 @@ app.get('/download/:session', (req, res) => {
 
 /* SOCKET */
 io.on('connection', socket => {
-  socket.on('start-session', startSession.bind(null, socket))
+  socket.on('start-session', sessionName => {
+    if (!sessionName) return
+    startSession(socket, sessionName)
+  })
 })
 
 server.listen(10000, () =>
