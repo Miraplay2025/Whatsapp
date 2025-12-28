@@ -1,3 +1,9 @@
+// ✅ FIX CRYPTO (OBRIGATÓRIO)
+import crypto from 'crypto'
+if (!global.crypto) {
+  global.crypto = crypto.webcrypto
+}
+
 import express from 'express'
 import http from 'http'
 import { Server } from 'socket.io'
