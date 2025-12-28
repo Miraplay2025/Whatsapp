@@ -1,138 +1,70 @@
 <!DOCTYPE html>
-<html lang="pt-BR">
+<html lang="pt">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>WhatsApp Baileys</title>
-
-<style>
-body {
-  font-family: Arial, sans-serif;
-  background: linear-gradient(135deg,#198754,#20c997);
-  color:#fff;
-  padding:15px;
-}
-.container {
-  max-width:480px;
-  margin:auto;
-}
-input, button {
-  width:100%;
-  padding:12px;
-  margin-top:10px;
-  border-radius:8px;
-  border:none;
-  font-size:16px;
-}
-button { background:#ffc107; color:#000; cursor:pointer; }
-button:disabled { background:#ccc; cursor:default; }
-
-.box {
-  background:#fff;
-  color:#000;
-  padding:12px;
-  margin-top:12px;
-  border-radius:10px;
-}
-#logs {
-  max-height:200px;
-  overflow:auto;
-  font-size:13px;
-}
-.code {
-  font-size:26px;
-  text-align:center;
-  letter-spacing:4px;
-}
-.expired {
-  color:red;
-  text-align:center;
-}
-</style>
+  <meta charset="UTF-8" />
+  <title>WhatsApp Pairing</title>
+  <script src="/socket.io/socket.io.js"></script>
+  <style>
+    body { font-family: Arial; background: #f4f4f4; padding: 20px }
+    .box { background: #fff; padding: 20px; max-width: 500px; margin: auto; border-radius: 8px }
+    input, button { width: 100%; padding: 10px; margin-top: 10px }
+    pre { background: #000; color: #0f0; padding: 10px; height: 200px; overflow: auto }
+    .hidden { display: none }
+  </style>
 </head>
 <body>
 
-<div class="container">
-<h2>WhatsApp Sessão</h2>
-
 <div class="box">
-  <input id="session" placeholder="Nome da sessão">
-  <button onclick="start()">Iniciar sessão</button>
+  <h2>Iniciar Sessão</h2>
+
+  <input id="session" placeholder="Nome da sessão" />
+  <button onclick="start()">Iniciar</button>
+
+  <div id="phoneBox" class="hidden">
+    <p>📱 Número (Moçambique)</p>
+    <input id="phone" placeholder="Ex: 840604424" />
+    <button onclick="sendPhone()">Enviar número</button>
+  </div>
+
+  <div id="codeBox" class="hidden">
+    <h3 id="code"></h3>
+  </div>
+
+  <pre id="logs"></pre>
 </div>
 
-<div id="phoneBox" class="box" style="display:none">
-  <input id="phone" placeholder="Número (sem 0 e sem +258)">
-  <button onclick="sendPhone()">Enviar número</button>
-</div>
-
-<div id="codeBox" class="box" style="display:none"></div>
-
-<div id="infoBox" class="box" style="display:none"></div>
-
-<div id="logs" class="box"></div>
-</div>
-
-<script src="/socket.io/socket.io.js"></script>
 <script>
-const socket = io()
-let currentPhone = ''
+  const socket = io()
 
-function log(msg){
-  logs.innerHTML += msg + '<br>'
-  logs.scrollTop = logs.scrollHeight
-}
+  function start() {
+    const name = document.getElementById('session').value
+    socket.emit('start-session', name)
+  }
 
-// ===== Funções =====
-function start(){
-  if (!session.value) return alert('Digite o nome da sessão')
-  socket.emit('start-session', session.value)
-}
+  function sendPhone() {
+    socket.emit('send-phone', {
+      phone: document.getElementById('phone').value
+    })
+  }
 
-function sendPhone(){
-  currentPhone = phone.value
-  socket.emit('send-phone', { phone: currentPhone })
-}
+  socket.on('request-phone', () => {
+    document.getElementById('phoneBox').classList.remove('hidden')
+  })
 
-function renewCode(){
-  socket.emit('renew-code')
-}
+  socket.on('pairing-code', data => {
+    document.getElementById('codeBox').classList.remove('hidden')
+    document.getElementById('code').innerText = `Código: ${data.code}`
+  })
 
-// ===== Socket events =====
-socket.on('log', log)
+  socket.on('pairing-expired', () => {
+    document.getElementById('code').innerText = '⌛ Código expirou'
+  })
 
-socket.on('request-phone', () => {
-  phoneBox.style.display = 'block'
-})
-
-socket.on('pairing-code', d => {
-  codeBox.style.display = 'block'
-  codeBox.innerHTML = `
-    <div class="code">${d.code}</div>
-    <small>Digite este código no WhatsApp</small>
-  `
-})
-
-socket.on('pairing-expired', () => {
-  codeBox.innerHTML = `
-    <div class="expired">Código expirou</div>
-    <button onclick="renewCode()">Gerar novo código</button>
-  `
-})
-
-socket.on('session-ready', d => {
-  phoneBox.style.display = 'none'
-  codeBox.style.display = 'none'
-
-  infoBox.style.display = 'block'
-  infoBox.innerHTML = `
-    <b>${d.name}</b><br>
-    Número: ${d.number}<br>
-    <a href="${d.downloadUrl}" target="_blank">⬇️ Baixar ZIP da sessão</a>
-    <hr>
-    <b>Grupos Participantes:</b><br>
-    ${d.groups.map(g => `${g.name} (${g.members} membros)`).join('<br>')}
-  `
-})
+  socket.on('log', msg => {
+    const logs = document.getElementById('logs')
+    logs.textContent += msg + '\n'
+    logs.scrollTop = logs.scrollHeight
+  })
 </script>
 
 </body>
