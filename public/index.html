@@ -6,62 +6,72 @@
 <title>WhatsApp Baileys</title>
 
 <style>
-body { font-family:Arial; background:#0d6efd; color:#fff; margin:0 }
-header {
-  padding:10px;
-  background:#084298;
-  display:flex;
-  justify-content:space-between;
+body {
+  font-family: Arial;
+  background: linear-gradient(135deg,#198754,#20c997);
+  color:#fff;
+  padding:15px;
 }
-.menu { cursor:pointer; display:none }
-.panel {
-  position:fixed; top:50px; right:10px;
-  background:#fff; color:#000;
-  padding:10px; border-radius:8px;
-  display:none;
+.container {
+  max-width:420px;
+  margin:auto;
 }
-.container { padding:15px; max-width:420px; margin:auto }
-input, button, textarea {
-  width:100%; padding:12px; margin-top:8px;
-  border-radius:8px; border:none
+input, button {
+  width:100%;
+  padding:14px;
+  margin-top:10px;
+  border-radius:8px;
+  border:none;
 }
 button { background:#ffc107 }
-.box { background:#fff; color:#000; padding:10px; border-radius:8px; margin-top:10px }
-#logs { max-height:200px; overflow:auto; font-size:13px }
+.box {
+  background:#fff;
+  color:#000;
+  padding:12px;
+  margin-top:12px;
+  border-radius:10px;
+}
+#logs {
+  max-height:200px;
+  overflow:auto;
+  font-size:13px;
+}
+.code {
+  font-size:26px;
+  text-align:center;
+  letter-spacing:4px;
+}
+.expired {
+  color:red;
+  text-align:center;
+}
 </style>
 </head>
 
 <body>
 
-<header>
-  <span>WhatsApp</span>
-  <span class="menu" id="menuBtn">☰</span>
-</header>
-
-<div class="panel" id="msgPanel">
-  <input id="msgPhone" placeholder="Número">
-  <textarea id="msgText" placeholder="Mensagem"></textarea>
-  <button onclick="sendMessage()">Enviar</button>
-</div>
-
 <div class="container">
+<h2>WhatsApp Sessão</h2>
+
 <input id="session" placeholder="Nome da sessão">
 <button onclick="start()">Iniciar</button>
 
 <div id="phoneBox" class="box" style="display:none">
-  <input id="phone" placeholder="Número">
+  <input id="phone" placeholder="Número (sem 0 e sem +258)">
   <button onclick="sendPhone()">Enviar número</button>
 </div>
 
 <div id="codeBox" class="box" style="display:none"></div>
+
 <div id="infoBox" class="box" style="display:none"></div>
+
 <div id="logs" class="box"></div>
 </div>
 
 <script src="/socket.io/socket.io.js"></script>
 <script>
 const socket = io()
-let currentSession = ''
+let currentPhone = ''
 
 function log(msg){
   logs.innerHTML += msg + '<br>'
@@ -69,43 +79,53 @@ function log(msg){
 }
 
 function start(){
-  currentSession = session.value
-  socket.emit('start-session', currentSession)
+  if (!session.value) return alert('Digite o nome da sessão')
+  socket.emit('start-session', session.value)
 }
 
 function sendPhone(){
-  socket.emit('send-phone', { phone: phone.value })
+  currentPhone = phone.value
+  socket.emit('send-phone', { phone: currentPhone })
 }
 
-function sendMessage(){
-  socket.emit('send-message',{
-    phone: msgPhone.value,
-    message: msgText.value
-  })
+function renewCode(){
+  socket.emit('renew-code')
 }
-
-menuBtn.onclick = () =>
-  msgPanel.style.display =
-    msgPanel.style.display === 'block' ? 'none' : 'block'
 
 socket.on('log', log)
 
-socket.on('request-phone', ()=> phoneBox.style.display='block')
-
-socket.on('pairing-code', d=>{
-  codeBox.style.display='block'
-  codeBox.innerHTML = `<h3>${d.code}</h3>`
+socket.on('request-phone', () => {
+  phoneBox.style.display = 'block'
 })
 
-socket.on('session-ready', d=>{
-  menuBtn.style.display='block'
-  infoBox.style.display='block'
+socket.on('pairing-code', d => {
+  codeBox.style.display = 'block'
+  codeBox.innerHTML = `
+    <div class="code">${d.code}</div>
+    <small>Digite este código no WhatsApp</small>
+  `
+})
+
+socket.on('pairing-expired', () => {
+  codeBox.innerHTML = `
+    <div class="expired">Código expirado</div>
+    <button onclick="renewCode()">Gerar novo código</button>
+  `
+})
+
+socket.on('session-ready', d => {
+  phoneBox.style.display = 'none'
+  codeBox.style.display = 'none'
+
+  infoBox.style.display = 'block'
   infoBox.innerHTML = `
     <b>${d.name}</b><br>
     ${d.number}<br>
     <a href="${d.downloadUrl}">⬇️ Baixar ZIP</a>
     <hr>
-    ${d.groups.map(g=>`${g.name} (${g.members})`).join('<br>')}
+    ${d.groups.map(g =>
+      `${g.name} (${g.members})`
+    ).join('<br>')}
   `
 })
 </script>
