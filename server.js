@@ -1,7 +1,7 @@
- const express = require('express');
+const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
-const { createBot } = require('hydra-bot');
+const HydraBot = require('hydra-bot');
 const fs = require('fs');
 const path = require('path');
 const archiver = require('archiver');
@@ -16,6 +16,9 @@ app.use(express.static('public'));
 
 const bots = {};
 
+/* ==========================
+   LOG HELPER
+========================== */
 function log(socket, session, msg) {
   const m = `[${session}] ${msg}`;
   console.log(m);
@@ -23,7 +26,7 @@ function log(socket, session, msg) {
 }
 
 /* ==========================
-   ZIP
+   ZIP SESSION
 ========================== */
 function zipFolder(source, out) {
   return new Promise((resolve, reject) => {
@@ -42,57 +45,99 @@ function zipFolder(source, out) {
 /* ==========================
    START SESSION
 ========================== */
-async function startSession(socket, session, phone) {
+function startSession(socket, session, phone) {
   if (bots[session]) {
-    log(socket, session, '⚠️ Sessão já existe');
+    log(socket, session, '⚠️ Sessão já ativa');
     return;
   }
 
   log(socket, session, '🚀 Iniciando sessão');
 
-  const bot = await createBot({
-    sessionName: session,
-    phoneNumber: phone
+  const bot = new HydraBot({
+    session: session,
+    phoneNumber: phone,
+    usePairingCode: true,
+    debug: true
   });
 
   bots[session] = bot;
 
-  /* 📲 Código de autenticação */
-  bot.on('pairingCode', code => {
-    log(socket, session, '📲 Código gerado');
+  /* ==========================
+     DEBUG GLOBAL DE EVENTOS
+  ========================== */
+  const originalEmit = bot.emit;
+  bot.emit = function (event, ...args) {
+    console.log(`🧠 [HYDRA EVENT] ${event}`, args);
+    return originalEmit.call(this, event, ...args);
+  };
+
+  /* 📲 Código de pareamento */
+  bot.on('pairing-code', code => {
+    log(socket, session, `📲 Código recebido: ${code}`);
     socket.emit('pairing-code', { session, code });
   });
 
   /* 🔐 Conectado */
   bot.on('ready', async () => {
-    const info = await bot.getHostDevice();
-
     log(socket, session, '✅ WhatsApp conectado');
 
-    /* 👥 Grupos */
-    const chats = await bot.getAllChats();
-    const groups = chats
-      .filter(c => c.isGroup)
-      .map(g => ({
-        name: g.name,
-        participants: g.participants?.length || 0
-      }));
+    let name = 'Desconhecido';
+    let number = phone;
+    let groups = [];
+
+    try {
+      const info = await bot.getHostDevice();
+      name = info.pushname || name;
+      number = info.id?.user || number;
+    } catch (e) {
+      log(socket, session, '⚠️ Não foi possível obter dados do perfil');
+    }
+
+    try {
+      const chats = await bot.getAllChats();
+      groups = chats
+        .filter(c => c.isGroup)
+        .map(g => ({
+          name: g.name || 'Sem nome',
+          participants: g.participants?.length || 0
+        }));
+    } catch (e) {
+      log(socket, session, '⚠️ Não foi possível obter grupos');
+    }
 
     /* 📁 ZIP */
     const sessionDir = path.join(__dirname, 'sessions', session);
     const zipDir = path.join(__dirname, 'zips');
     const zipPath = path.join(zipDir, `${session}.zip`);
 
-    if (!fs.existsSync(zipDir)) fs.mkdirSync(zipDir);
-    await zipFolder(sessionDir, zipPath);
+    if (!fs.existsSync(zipDir)) fs.mkdirSync(zipDir, { recursive: true });
+
+    try {
+      await zipFolder(sessionDir, zipPath);
+      log(socket, session, '🗜️ Sessão compactada');
+    } catch (e) {
+      log(socket, session, '❌ Erro ao compactar sessão');
+    }
 
     socket.emit('session-ready', {
       session,
-      name: info.pushname,
-      number: info.id.user,
+      name,
+      number,
       groups,
       downloadUrl: `/download/${session}`
     });
+  });
+
+  /* ❌ Desconectado */
+  bot.on('disconnected', reason => {
+    log(socket, session, '❌ Desconectado: ' + reason);
+    delete bots[session];
+    socket.emit('session-ended', { session, reason });
+  });
+
+  /* 🚨 Erro */
+  bot.on('error', err => {
+    log(socket, session, '🚨 Erro: ' + err);
   });
 
   bot.start();
@@ -103,7 +148,7 @@ async function startSession(socket, session, phone) {
 ========================== */
 app.get('/download/:session', (req, res) => {
   const zip = path.join(__dirname, 'zips', `${req.params.session}.zip`);
-  if (!fs.existsSync(zip)) return res.sendStatus(404);
+  if (!fs.existsSync(zip)) return res.status(404).send('ZIP não disponível');
   res.download(zip);
 });
 
@@ -111,15 +156,19 @@ app.get('/download/:session', (req, res) => {
    SOCKET
 ========================== */
 io.on('connection', socket => {
-  socket.on('start-session', ({ session, phone }) => {
-    if (!session || !phone) {
+  socket.on('start-session', data => {
+    if (!data?.session || !data?.phone) {
       socket.emit('log', '❌ Sessão ou número inválido');
       return;
     }
-    startSession(socket, session, phone);
+    startSession(socket, data.session.trim(), data.phone.trim());
   });
 });
 
-server.listen(10000, () =>
-  console.log('🚀 Servidor rodando na porta 10000')
+/* ==========================
+   SERVER
+========================== */
+const PORT = process.env.PORT || 10000;
+server.listen(PORT, () =>
+  console.log(`🌐 Servidor rodando na porta ${PORT}`)
 );
