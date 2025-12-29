@@ -1,70 +1,182 @@
 <!DOCTYPE html>
-<html lang="pt">
+<html lang="pt-BR">
 <head>
-  <meta charset="UTF-8" />
-  <title>WhatsApp Pairing</title>
-  <script src="/socket.io/socket.io.js"></script>
-  <style>
-    body { font-family: Arial; background: #f4f4f4; padding: 20px }
-    .box { background: #fff; padding: 20px; max-width: 500px; margin: auto; border-radius: 8px }
-    input, button { width: 100%; padding: 10px; margin-top: 10px }
-    pre { background: #000; color: #0f0; padding: 10px; height: 200px; overflow: auto }
-    .hidden { display: none }
-  </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WhatsApp Session Manager</title>
+
+<style>
+body {
+  font-family: Arial, sans-serif;
+  background: linear-gradient(135deg,#4facfe,#00f2fe);
+  padding: 15px;
+  color: #fff;
+}
+.container {
+  max-width: 420px;
+  margin: auto;
+  text-align: center;
+}
+input, button {
+  width: 100%;
+  padding: 14px;
+  margin-top: 10px;
+  font-size: 16px;
+  border-radius: 8px;
+  border: none;
+}
+button {
+  background: #ff9800;
+  color: #fff;
+  cursor: pointer;
+}
+button:disabled {
+  background: #999;
+}
+.box {
+  background: #fff;
+  color: #000;
+  margin-top: 15px;
+  padding: 12px;
+  border-radius: 10px;
+  display: none;
+  text-align: left;
+}
+#logs {
+  max-height: 200px;
+  overflow: auto;
+  font-size: 13px;
+}
+.code {
+  font-size: 26px;
+  text-align: center;
+  font-weight: bold;
+  letter-spacing: 4px;
+}
+.group {
+  font-size: 14px;
+  margin-bottom: 5px;
+}
+.download {
+  display: block;
+  margin-top: 10px;
+  background: #28a745;
+  color: #fff;
+  text-align: center;
+  padding: 10px;
+  border-radius: 6px;
+  text-decoration: none;
+}
+</style>
 </head>
+
 <body>
 
-<div class="box">
-  <h2>Iniciar Sessão</h2>
+<div class="container">
+  <h2>WhatsApp Session</h2>
 
-  <input id="session" placeholder="Nome da sessão" />
-  <button onclick="start()">Iniciar</button>
+  <!-- Sessão -->
+  <input id="sessionName" placeholder="Nome da sessão">
 
-  <div id="phoneBox" class="hidden">
-    <p>📱 Número (Moçambique)</p>
-    <input id="phone" placeholder="Ex: 840604424" />
-    <button onclick="sendPhone()">Enviar número</button>
+  <!-- Número -->
+  <input id="phone" placeholder="Número com DDI (ex: +5511999999999)">
+
+  <button id="startBtn" onclick="start()">Iniciar Sessão</button>
+
+  <div id="status">Aguardando...</div>
+
+  <!-- Código -->
+  <div id="codeBox" class="box">
+    <h3>Código de Conexão</h3>
+    <div class="code" id="pairCode">----</div>
+    <p>Digite este código no WhatsApp</p>
   </div>
 
-  <div id="codeBox" class="hidden">
-    <h3 id="code"></h3>
+  <!-- Info -->
+  <div id="infoBox" class="box">
+    <h3>Informações da Conta</h3>
+    <div id="accountInfo"></div>
+    <h4>Grupos</h4>
+    <div id="groups"></div>
+    <a id="downloadLink" class="download" href="#" target="_blank">⬇️ Baixar ZIP</a>
   </div>
 
-  <pre id="logs"></pre>
+  <!-- Logs -->
+  <div id="logs" class="box"></div>
 </div>
 
+<script src="/socket.io/socket.io.js"></script>
+
 <script>
-  const socket = io()
+const socket = io({
+  transports: ['websocket']
+});
 
-  function start() {
-    const name = document.getElementById('session').value
-    socket.emit('start-session', name)
+const statusEl = document.getElementById('status');
+const logsEl = document.getElementById('logs');
+const codeBox = document.getElementById('codeBox');
+const pairCodeEl = document.getElementById('pairCode');
+const infoBox = document.getElementById('infoBox');
+const accountInfoEl = document.getElementById('accountInfo');
+const groupsEl = document.getElementById('groups');
+const downloadLink = document.getElementById('downloadLink');
+const startBtn = document.getElementById('startBtn');
+
+function log(msg) {
+  const d = document.createElement('div');
+  d.textContent = msg;
+  logsEl.appendChild(d);
+  logsEl.scrollTop = logsEl.scrollHeight;
+  logsEl.style.display = 'block';
+}
+
+function start() {
+  const session = document.getElementById('sessionName').value.trim();
+  const phone = document.getElementById('phone').value.trim();
+
+  if (!session || !phone) {
+    alert('Informe o nome da sessão e o número');
+    return;
   }
 
-  function sendPhone() {
-    socket.emit('send-phone', {
-      phone: document.getElementById('phone').value
-    })
-  }
+  startBtn.disabled = true;
+  statusEl.textContent = '🚀 Iniciando sessão...';
 
-  socket.on('request-phone', () => {
-    document.getElementById('phoneBox').classList.remove('hidden')
-  })
+  socket.emit('start-session', { session, phone });
+}
 
-  socket.on('pairing-code', data => {
-    document.getElementById('codeBox').classList.remove('hidden')
-    document.getElementById('code').innerText = `Código: ${data.code}`
-  })
+socket.on('log', msg => {
+  log(msg);
+});
 
-  socket.on('pairing-expired', () => {
-    document.getElementById('code').innerText = '⌛ Código expirou'
-  })
+socket.on('pairing-code', data => {
+  codeBox.style.display = 'block';
+  pairCodeEl.textContent = data.code;
+  statusEl.textContent = '📲 Digite o código no WhatsApp';
+});
 
-  socket.on('log', msg => {
-    const logs = document.getElementById('logs')
-    logs.textContent += msg + '\n'
-    logs.scrollTop = logs.scrollHeight
-  })
+socket.on('session-ready', data => {
+  codeBox.style.display = 'none';
+  infoBox.style.display = 'block';
+
+  statusEl.textContent = '✅ Conectado';
+
+  accountInfoEl.innerHTML = `
+    <p><b>Nome:</b> ${data.name}</p>
+    <p><b>Número:</b> ${data.number}</p>
+  `;
+
+  groupsEl.innerHTML = '';
+  data.groups.forEach(g => {
+    const div = document.createElement('div');
+    div.className = 'group';
+    div.textContent = `${g.name} — ${g.participants} membros`;
+    groupsEl.appendChild(div);
+  });
+
+  downloadLink.href = data.downloadUrl;
+  startBtn.disabled = false;
+});
 </script>
 
 </body>
