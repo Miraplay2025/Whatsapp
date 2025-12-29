@@ -1,15 +1,15 @@
 {
-  "name": "whatsapp-baileys-project",
-  "version": "1.0.0",
-  "type": "module",
+  "name": "whatsapp-hydra-sessions",
+  "version": "2.0.0",
+  "main": "server.js",
   "scripts": {
     "start": "node server.js"
   },
   "dependencies": {
-    "@whiskeysockets/baileys": "*",
     "express": "*",
     "socket.io": "*",
-    "cors": "*",
-    "archiver": "*"
+    "hydra-bot": "*",
+    "archiver": "*",
+    "cors": "*"
   }
 }
