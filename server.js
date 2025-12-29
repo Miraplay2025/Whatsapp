@@ -17,7 +17,7 @@ app.use(express.static('public'));
 const bots = {};
 
 /* ==========================
-   LOG HELPER
+   LOG
 ========================== */
 function log(socket, session, msg) {
   const m = `[${session}] ${msg}`;
@@ -26,7 +26,7 @@ function log(socket, session, msg) {
 }
 
 /* ==========================
-   ZIP SESSION
+   ZIP
 ========================== */
 function zipFolder(source, out) {
   return new Promise((resolve, reject) => {
@@ -53,7 +53,8 @@ function startSession(socket, session, phone) {
 
   log(socket, session, '🚀 Iniciando sessão');
 
-  const bot = new HydraBot({
+  /* ✅ INICIALIZAÇÃO CORRETA */
+  const bot = HydraBot({
     session: session,
     phoneNumber: phone,
     usePairingCode: true,
@@ -63,17 +64,19 @@ function startSession(socket, session, phone) {
   bots[session] = bot;
 
   /* ==========================
-     DEBUG GLOBAL DE EVENTOS
+     DEBUG GLOBAL
   ========================== */
-  const originalEmit = bot.emit;
-  bot.emit = function (event, ...args) {
-    console.log(`🧠 [HYDRA EVENT] ${event}`, args);
-    return originalEmit.call(this, event, ...args);
-  };
+  if (typeof bot.emit === 'function') {
+    const originalEmit = bot.emit;
+    bot.emit = function (event, ...args) {
+      console.log(`🧠 [HYDRA EVENT] ${event}`, args);
+      return originalEmit.call(this, event, ...args);
+    };
+  }
 
-  /* 📲 Código de pareamento */
+  /* 📲 Código */
   bot.on('pairing-code', code => {
-    log(socket, session, `📲 Código recebido: ${code}`);
+    log(socket, session, `📲 Código: ${code}`);
     socket.emit('pairing-code', { session, code });
   });
 
@@ -87,10 +90,10 @@ function startSession(socket, session, phone) {
 
     try {
       const info = await bot.getHostDevice();
-      name = info.pushname || name;
-      number = info.id?.user || number;
+      name = info?.pushname || name;
+      number = info?.id?.user || number;
     } catch (e) {
-      log(socket, session, '⚠️ Não foi possível obter dados do perfil');
+      log(socket, session, '⚠️ Falha ao obter perfil');
     }
 
     try {
@@ -102,10 +105,10 @@ function startSession(socket, session, phone) {
           participants: g.participants?.length || 0
         }));
     } catch (e) {
-      log(socket, session, '⚠️ Não foi possível obter grupos');
+      log(socket, session, '⚠️ Falha ao obter grupos');
     }
 
-    /* 📁 ZIP */
+    /* 📦 ZIP */
     const sessionDir = path.join(__dirname, 'sessions', session);
     const zipDir = path.join(__dirname, 'zips');
     const zipPath = path.join(zipDir, `${session}.zip`);
@@ -139,8 +142,6 @@ function startSession(socket, session, phone) {
   bot.on('error', err => {
     log(socket, session, '🚨 Erro: ' + err);
   });
-
-  bot.start();
 }
 
 /* ==========================
