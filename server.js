@@ -1,7 +1,7 @@
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
-const HydraBot = require('hydra-bot');
+const hydraImport = require('hydra-bot');
 const fs = require('fs');
 const path = require('path');
 const archiver = require('archiver');
@@ -15,6 +15,32 @@ app.use(cors());
 app.use(express.static('public'));
 
 const bots = {};
+
+/* ==========================
+   RESOLVE HYDRA FACTORY
+========================== */
+function createHydraBot(config) {
+  // Caso 1: default export
+  if (typeof hydraImport === 'function') {
+    return hydraImport(config);
+  }
+
+  // Caso 2: default dentro de objeto
+  if (hydraImport?.default && typeof hydraImport.default === 'function') {
+    return hydraImport.default(config);
+  }
+
+  // Caso 3: método create / init / start
+  const possibleKeys = ['createBot', 'create', 'init', 'start'];
+  for (const key of possibleKeys) {
+    if (typeof hydraImport[key] === 'function') {
+      return hydraImport[key](config);
+    }
+  }
+
+  console.error('❌ Hydra-bot export:', hydraImport);
+  throw new Error('Não foi possível inicializar o hydra-bot');
+}
 
 /* ==========================
    LOG
@@ -53,35 +79,41 @@ function startSession(socket, session, phone) {
 
   log(socket, session, '🚀 Iniciando sessão');
 
-  /* ✅ INICIALIZAÇÃO CORRETA */
-  const bot = HydraBot({
-    session: session,
-    phoneNumber: phone,
-    usePairingCode: true,
-    debug: true
-  });
+  let bot;
+  try {
+    bot = createHydraBot({
+      session,
+      phoneNumber: phone,
+      usePairingCode: true,
+      debug: true
+    });
+  } catch (err) {
+    log(socket, session, '❌ Falha ao iniciar Hydra');
+    console.error(err);
+    return;
+  }
 
   bots[session] = bot;
 
   /* ==========================
-     DEBUG GLOBAL
+     DEBUG TOTAL DE EVENTOS
   ========================== */
-  if (typeof bot.emit === 'function') {
-    const originalEmit = bot.emit;
-    bot.emit = function (event, ...args) {
+  if (bot?.emit) {
+    const originalEmit = bot.emit.bind(bot);
+    bot.emit = (event, ...args) => {
       console.log(`🧠 [HYDRA EVENT] ${event}`, args);
-      return originalEmit.call(this, event, ...args);
+      return originalEmit(event, ...args);
     };
   }
 
   /* 📲 Código */
-  bot.on('pairing-code', code => {
+  bot.on?.('pairing-code', code => {
     log(socket, session, `📲 Código: ${code}`);
     socket.emit('pairing-code', { session, code });
   });
 
-  /* 🔐 Conectado */
-  bot.on('ready', async () => {
+  /* 🔐 Ready */
+  bot.on?.('ready', async () => {
     log(socket, session, '✅ WhatsApp conectado');
 
     let name = 'Desconhecido';
@@ -89,26 +121,25 @@ function startSession(socket, session, phone) {
     let groups = [];
 
     try {
-      const info = await bot.getHostDevice();
-      name = info?.pushname || name;
-      number = info?.id?.user || number;
-    } catch (e) {
-      log(socket, session, '⚠️ Falha ao obter perfil');
-    }
+      const info = await bot.getHostDevice?.();
+      if (info) {
+        name = info.pushname || name;
+        number = info.id?.user || number;
+      }
+    } catch {}
 
     try {
-      const chats = await bot.getAllChats();
-      groups = chats
-        .filter(c => c.isGroup)
-        .map(g => ({
-          name: g.name || 'Sem nome',
-          participants: g.participants?.length || 0
-        }));
-    } catch (e) {
-      log(socket, session, '⚠️ Falha ao obter grupos');
-    }
+      const chats = await bot.getAllChats?.();
+      if (Array.isArray(chats)) {
+        groups = chats
+          .filter(c => c.isGroup)
+          .map(g => ({
+            name: g.name || 'Sem nome',
+            participants: g.participants?.length || 0
+          }));
+      }
+    } catch {}
 
-    /* 📦 ZIP */
     const sessionDir = path.join(__dirname, 'sessions', session);
     const zipDir = path.join(__dirname, 'zips');
     const zipPath = path.join(zipDir, `${session}.zip`);
@@ -118,7 +149,7 @@ function startSession(socket, session, phone) {
     try {
       await zipFolder(sessionDir, zipPath);
       log(socket, session, '🗜️ Sessão compactada');
-    } catch (e) {
+    } catch {
       log(socket, session, '❌ Erro ao compactar sessão');
     }
 
@@ -131,15 +162,12 @@ function startSession(socket, session, phone) {
     });
   });
 
-  /* ❌ Desconectado */
-  bot.on('disconnected', reason => {
+  bot.on?.('disconnected', reason => {
     log(socket, session, '❌ Desconectado: ' + reason);
     delete bots[session];
-    socket.emit('session-ended', { session, reason });
   });
 
-  /* 🚨 Erro */
-  bot.on('error', err => {
+  bot.on?.('error', err => {
     log(socket, session, '🚨 Erro: ' + err);
   });
 }
